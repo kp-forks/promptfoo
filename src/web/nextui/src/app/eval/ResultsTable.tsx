@@ -27,6 +27,7 @@ import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
 import type { CellContext, ColumnDef, VisibilityState } from '@tanstack/table-core';
 import Link from 'next/link';
+import remarkGfm from 'remark-gfm';
 import invariant from 'tiny-invariant';
 import EvalOutputCell from './EvalOutputCell';
 import './ResultsTable.css';
@@ -276,6 +277,8 @@ function ResultsTable({
     searchRegex,
   ]);
 
+  const [pagination, setPagination] = React.useState({ pageIndex: 0, pageSize: 50 });
+
   React.useEffect(() => {
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   }, [failureFilter, filterMode, searchText]);
@@ -340,7 +343,7 @@ function ResultsTable({
                 return (
                   <div className="cell">
                     {renderMarkdown ? (
-                      <ReactMarkdown>{value}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{value}</ReactMarkdown>
                     ) : (
                       <TruncatedText text={value} maxLength={maxTextLength} />
                     )}
@@ -557,8 +560,6 @@ function ResultsTable({
     cols.push(...variableColumns, ...promptColumns);
     return cols;
   }, [descriptionColumn, variableColumns, promptColumns]);
-
-  const [pagination, setPagination] = React.useState({ pageIndex: 0, pageSize: 50 });
 
   const reactTable = useReactTable({
     data: filteredBody,

@@ -43,7 +43,7 @@ import {
   isGradingResult,
   AssertionValue,
 } from './types';
-import { transformOutput, getNunjucksEngine } from './util';
+import { transformOutput, getNunjucksEngine, extractJsonObjects } from './util';
 
 const ASSERTIONS_MAX_CONCURRENCY = process.env.PROMPTFOO_ASSERTIONS_MAX_CONCURRENCY
   ? parseInt(process.env.PROMPTFOO_ASSERTIONS_MAX_CONCURRENCY, 10)
@@ -111,106 +111,86 @@ function handleRougeScore(
   };
 }
 
-export async function runAssertions({
-  prompt,
-  provider,
-  test,
-  output,
-  latencyMs,
-  logProbs,
-  cost,
-}: {
-  prompt?: string;
-  provider?: ApiProvider;
-  test: AtomicTestCase;
-  output: string | object;
-  latencyMs?: number;
-  logProbs?: number[];
-  cost?: number;
-}): Promise<GradingResult> {
-  if (!test.assert || test.assert.length < 1) {
-    return AssertionsResult.noAssertsResult();
+export async function isSql(
+  outputString: string,
+  renderedValue: AssertionValue | undefined,
+  inverse: boolean,
+  assertion: Assertion,
+): Promise<GradingResult> {
+  let pass = false;
+  let parsedSql;
+  let databaseType: string = 'MySQL';
+  let whiteTableList: string[] | undefined;
+  let whiteColumnList: string[] | undefined;
+
+  if (renderedValue && typeof renderedValue === 'object') {
+    const value = renderedValue as {
+      database?: string;
+      allowedTables?: string[];
+      allowedColumns?: string[];
+    };
+
+    databaseType = value.database || 'MySQL';
+    whiteTableList = value.allowedTables;
+    whiteColumnList = value.allowedColumns;
   }
 
-  const mainAssertResult = new AssertionsResult({
-    threshold: test.threshold,
-  });
-  const subAssertResults: AssertionsResult[] = [];
-  const asserts: {
-    assertion: Assertion;
-    assertResult: AssertionsResult;
-    index: number;
-  }[] = test.assert
-    .map((assertion, i) => {
-      if (assertion.type === 'assert-set') {
-        const subAssertResult = new AssertionsResult({
-          threshold: assertion.threshold,
-          parentAssertionSet: {
-            assertionSet: assertion,
-            index: i,
-          },
-        });
+  if (renderedValue && typeof renderedValue !== 'object') {
+    throw new Error('is-sql assertion must have a object value.');
+  }
 
-        subAssertResults.push(subAssertResult);
-
-        return assertion.assert.map((subAssert, j) => {
-          return {
-            assertion: subAssert,
-            assertResult: subAssertResult,
-            index: j,
-          };
-        });
-      }
-
-      return { assertion, assertResult: mainAssertResult, index: i };
-    })
-    .flat();
-
-  await async.forEachOfLimit(
-    asserts,
-    ASSERTIONS_MAX_CONCURRENCY,
-    async ({ assertion, assertResult, index }) => {
-      if (assertion.type.startsWith('select-')) {
-        // Select-type assertions are handled separately because they depend on multiple outputs.
-        return;
-      }
-
-      const result = await runAssertion({
-        prompt,
-        provider,
-        assertion,
-        test,
-        output,
-        latencyMs,
-        logProbs,
-        cost,
-      });
-
-      assertResult.addResult({
-        index,
-        result,
-        metric: assertion.metric,
-        weight: assertion.weight,
-      });
-    },
-  );
-
-  subAssertResults.forEach((subAssertResult) => {
-    const result = subAssertResult.testResult();
-    const {
-      index,
-      assertionSet: { metric, weight },
-    } = subAssertResult.parentAssertionSet!;
-
-    mainAssertResult.addResult({
-      index,
-      result,
-      metric,
-      weight,
-    });
+  const { Parser: SqlParser } = await import('node-sql-parser').catch(() => {
+    throw new Error('node-sql-parser is not installed. Please install it first');
   });
 
-  return mainAssertResult.testResult();
+  const sqlParser = new SqlParser();
+
+  const opt: sqlParserOption = { database: databaseType };
+
+  const failureReasons: string[] = [];
+
+  try {
+    parsedSql = sqlParser.astify(outputString, opt);
+    pass = !inverse;
+  } catch (err) {
+    pass = inverse;
+    failureReasons.push(
+      `SQL statement does not conform to the provided ${databaseType} database syntax.`,
+    );
+  }
+
+  if (whiteTableList) {
+    opt.type = 'table';
+    try {
+      sqlParser.whiteListCheck(outputString, whiteTableList, opt);
+    } catch (err) {
+      pass = inverse;
+      const error = err as Error;
+      failureReasons.push(`SQL validation failed: ${error.message}.`);
+    }
+  }
+
+  if (whiteColumnList) {
+    opt.type = 'column';
+    try {
+      sqlParser.whiteListCheck(outputString, whiteColumnList, opt);
+    } catch (err) {
+      pass = inverse;
+      const error = err as Error;
+      failureReasons.push(`SQL validation failed: ${error.message}.`);
+    }
+  }
+
+  if (inverse && pass === false && failureReasons.length === 0) {
+    failureReasons.push('The output SQL statement is valid');
+  }
+
+  return {
+    pass,
+    score: pass ? 1 : 0,
+    reason: pass ? 'Assertion passed' : failureReasons.join(' '),
+    assertion,
+  };
 }
 
 export async function runAssertion({
@@ -550,10 +530,10 @@ export async function runAssertion({
   }
   if (baseType === 'contains-json') {
     let errorMessage = 'Expected output to contain valid JSON';
-    const jsonOutputs = containsJSON(outputString);
-    for (const jsonMatch of jsonOutputs) {
-      pass = jsonMatch !== inverse;
-      if (pass && renderedValue) {
+    const jsonObjects = extractJsonObjects(outputString);
+    pass = inverse ? jsonObjects.length === 0 : jsonObjects.length > 0;
+    for (const jsonObject of jsonObjects) {
+      if (renderedValue) {
         let validate: ValidateFunction;
         if (typeof renderedValue === 'string') {
           if (renderedValue.startsWith('file://')) {
@@ -571,7 +551,7 @@ export async function runAssertion({
         } else {
           throw new Error('contains-json assertion must have a string or object value');
         }
-        pass = validate(jsonMatch);
+        pass = validate(jsonObject);
         if (pass) {
           break;
         } else {
@@ -1278,116 +1258,106 @@ ${
   throw new Error('Unknown assertion type: ' + assertion.type);
 }
 
-function containsJSON(str: string): any {
-  // This will extract all json objects from a string
+export async function runAssertions({
+  prompt,
+  provider,
+  test,
+  output,
+  latencyMs,
+  logProbs,
+  cost,
+}: {
+  prompt?: string;
+  provider?: ApiProvider;
+  test: AtomicTestCase;
+  output: string | object;
+  latencyMs?: number;
+  logProbs?: number[];
+  cost?: number;
+}): Promise<GradingResult> {
+  if (!test.assert || test.assert.length < 1) {
+    return AssertionsResult.noAssertsResult();
+  }
 
-  const jsonObjects = [];
-  let openBracket = str.indexOf('{');
-  let closeBracket = str.indexOf('}', openBracket);
-  // Iterate over the string until we find a valid JSON-like pattern
-  // Iterate over all trailing } until the contents parse as json
-  while (openBracket !== -1) {
-    const jsonStr = str.slice(openBracket, closeBracket + 1);
-    try {
-      jsonObjects.push(JSON.parse(jsonStr));
-      // This is a valid JSON object, so start looking for
-      // an opening bracket after the last closing bracket
-      openBracket = str.indexOf('{', closeBracket + 1);
-      closeBracket = str.indexOf('}', openBracket);
-    } catch (err) {
-      // Not a valid object, move on to the next closing bracket
-      closeBracket = str.indexOf('}', closeBracket + 1);
-      while (closeBracket === -1) {
-        // No closing brackets made a valid json object, so
-        // start looking with the next opening bracket
-        openBracket = str.indexOf('{', openBracket + 1);
-        closeBracket = str.indexOf('}', openBracket);
+  const mainAssertResult = new AssertionsResult({
+    threshold: test.threshold,
+  });
+  const subAssertResults: AssertionsResult[] = [];
+  const asserts: {
+    assertion: Assertion;
+    assertResult: AssertionsResult;
+    index: number;
+  }[] = test.assert
+    .map((assertion, i) => {
+      if (assertion.type === 'assert-set') {
+        const subAssertResult = new AssertionsResult({
+          threshold: assertion.threshold,
+          parentAssertionSet: {
+            assertionSet: assertion,
+            index: i,
+          },
+        });
+
+        subAssertResults.push(subAssertResult);
+
+        return assertion.assert.map((subAssert, j) => {
+          return {
+            assertion: subAssert,
+            assertResult: subAssertResult,
+            index: j,
+          };
+        });
       }
-    }
-  }
-  return jsonObjects;
-}
 
-export async function isSql(
-  outputString: string,
-  renderedValue: AssertionValue | undefined,
-  inverse: boolean,
-  assertion: Assertion,
-): Promise<GradingResult> {
-  let pass = false;
-  let parsedSql;
-  let databaseType: string = 'MySQL';
-  let whiteTableList: string[] | undefined;
-  let whiteColumnList: string[] | undefined;
+      return { assertion, assertResult: mainAssertResult, index: i };
+    })
+    .flat();
 
-  if (renderedValue && typeof renderedValue === 'object') {
-    const value = renderedValue as {
-      database?: string;
-      allowedTables?: string[];
-      allowedColumns?: string[];
-    };
+  await async.forEachOfLimit(
+    asserts,
+    ASSERTIONS_MAX_CONCURRENCY,
+    async ({ assertion, assertResult, index }) => {
+      if (assertion.type.startsWith('select-')) {
+        // Select-type assertions are handled separately because they depend on multiple outputs.
+        return;
+      }
 
-    databaseType = value.database || 'MySQL';
-    whiteTableList = value.allowedTables;
-    whiteColumnList = value.allowedColumns;
-  }
+      const result = await runAssertion({
+        prompt,
+        provider,
+        assertion,
+        test,
+        output,
+        latencyMs,
+        logProbs,
+        cost,
+      });
 
-  if (renderedValue && typeof renderedValue !== 'object') {
-    throw new Error('is-sql assertion must have a object value.');
-  }
+      assertResult.addResult({
+        index,
+        result,
+        metric: assertion.metric,
+        weight: assertion.weight,
+      });
+    },
+  );
 
-  const { Parser: SqlParser } = await import('node-sql-parser').catch(() => {
-    throw new Error('node-sql-parser is not installed. Please install it first');
+  subAssertResults.forEach((subAssertResult) => {
+    const result = subAssertResult.testResult();
+    const {
+      index,
+      assertionSet: { metric, weight },
+    } = subAssertResult.parentAssertionSet!;
+
+    mainAssertResult.addResult({
+      index,
+      result,
+      metric,
+      weight,
+    });
   });
 
-  const sqlParser = new SqlParser();
-
-  const opt: sqlParserOption = { database: databaseType };
-
-  const failureReasons: string[] = [];
-
-  try {
-    parsedSql = sqlParser.astify(outputString, opt);
-    pass = !inverse;
-  } catch (err) {
-    pass = inverse;
-    failureReasons.push(
-      `SQL statement does not conform to the provided ${databaseType} database syntax.`,
-    );
-  }
-
-  if (whiteTableList) {
-    opt.type = 'table';
-    try {
-      sqlParser.whiteListCheck(outputString, whiteTableList, opt);
-    } catch (err) {
-      pass = inverse;
-      const error = err as Error;
-      failureReasons.push(`SQL validation failed: ${error.message}.`);
-    }
-  }
-
-  if (whiteColumnList) {
-    opt.type = 'column';
-    try {
-      sqlParser.whiteListCheck(outputString, whiteColumnList, opt);
-    } catch (err) {
-      pass = inverse;
-      const error = err as Error;
-      failureReasons.push(`SQL validation failed: ${error.message}.`);
-    }
-  }
-
-  if (inverse && pass === false && failureReasons.length === 0) {
-    failureReasons.push('The output SQL statement is valid');
-  }
-
-  return {
-    pass,
-    score: pass ? 1 : 0,
-    reason: pass ? 'Assertion passed' : failureReasons.join(' '),
-    assertion,
-  };
+  return mainAssertResult.testResult();
 }
 
 export async function runCompareAssertion(
@@ -1425,6 +1395,8 @@ export async function readAssertions(filePath: string): Promise<Assertion[]> {
 
 // These exports are used by the node.js package (index.ts)
 export default {
+  runAssertion,
+  runAssertions,
   matchesSimilarity,
   matchesClassification,
   matchesLlmRubric,

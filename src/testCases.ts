@@ -1,3 +1,4 @@
+import $RefParser from '@apidevtools/json-schema-ref-parser';
 import { parse as parseCsv } from 'csv-parse/sync';
 import * as fs from 'fs';
 import { globSync } from 'glob';
@@ -164,6 +165,10 @@ export async function readTests(
     const testFiles = globSync(resolvedPath, {
       windowsPathsNoEscape: true,
     });
+    const _deref = async (testCases: TestCase[], file: string) => {
+      logger.debug(`Dereferencing testfile ${file}`);
+      return (await $RefParser.dereference(testCases)) as TestCase[];
+    };
 
     const ret: TestCase<Record<string, string | string[] | object>>[] = [];
     if (testFiles.length < 1) {
@@ -176,12 +181,17 @@ export async function readTests(
         testCases = await readStandaloneTestsFile(testFile, basePath);
       } else if (testFile.endsWith('.yaml') || testFile.endsWith('.yml')) {
         testCases = yaml.load(fs.readFileSync(testFile, 'utf-8')) as TestCase[];
+        testCases = await _deref(testCases, testFile);
       } else if (testFile.endsWith('.json')) {
-        testCases = require(testFile);
+        testCases = await _deref(require(testFile), testFile);
       } else {
         throw new Error(`Unsupported file type for test file: ${testFile}`);
       }
+
       if (testCases) {
+        if (!Array.isArray(testCases) && typeof testCases === 'object') {
+          testCases = [testCases];
+        }
         for (const testCase of testCases) {
           ret.push(await readTest(testCase, path.dirname(testFile)));
         }
@@ -219,17 +229,6 @@ interface SynthesizeOptions {
   tests: TestCase[];
   numPersonas?: number;
   numTestCasesPerPersona?: number;
-}
-
-export async function synthesizeFromTestSuite(
-  testSuite: TestSuite,
-  options: Partial<SynthesizeOptions>,
-) {
-  return synthesize({
-    ...options,
-    prompts: testSuite.prompts.map((prompt) => prompt.raw),
-    tests: testSuite.tests || [],
-  });
 }
 
 export async function synthesize({
@@ -373,4 +372,15 @@ Your response should contain a JSON map of variable names to values, of the form
     JSON.parse(testCase),
   );
   return dedupedTestCaseVars;
+}
+
+export async function synthesizeFromTestSuite(
+  testSuite: TestSuite,
+  options: Partial<SynthesizeOptions>,
+) {
+  return synthesize({
+    ...options,
+    prompts: testSuite.prompts.map((prompt) => prompt.raw),
+    tests: testSuite.tests || [],
+  });
 }

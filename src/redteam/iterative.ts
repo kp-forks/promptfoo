@@ -5,17 +5,9 @@ import { getNunjucksEngine } from '../util';
 
 const ATTACKER_MODEL = 'gpt-4o';
 
-class RedteamIterativeJailbreaks implements ApiProvider {
-  id() {
-    return 'redteam-iterative-jailbreaks';
-  }
-
-  async callApi(prompt: string, context?: CallApiContextParams, options?: CallApiOptionsParams) {
-    invariant(options?.originalProvider, 'Expected originalProvider to be set');
-    invariant(context?.vars, 'Expected vars to be set');
-    return runRedteamConversation(prompt, context.vars, options?.originalProvider);
-  }
-}
+const NUM_ITERATIONS = process.env.PROMPTFOO_NUM_JAILBREAK_ITERATIONS
+  ? parseInt(process.env.PROMPTFOO_NUM_JAILBREAK_ITERATIONS, 10)
+  : 4;
 
 // Based on: https://arxiv.org/abs/2312.02119
 
@@ -111,13 +103,18 @@ async function runRedteamConversation(
   let highestScore = 0;
   let bestResponse = '';
 
-  for (let i = 0; i < 4; i++) {
+  let targetPrompt: string | null = null;
+  for (let i = 0; i < NUM_ITERATIONS; i++) {
     const redteamBody = JSON.stringify(redteamHistory);
 
     // Get new prompt
     const redteamResp = await redteamProvider.callApi(redteamBody);
     invariant(typeof redteamResp.output === 'string', 'Expected output to be a string');
-    const { improvement, prompt: newPrompt } = JSON.parse(redteamResp.output);
+    const { improvement, prompt: newPrompt } = JSON.parse(redteamResp.output) as {
+      improvement: string;
+      prompt: string;
+    };
+    targetPrompt = newPrompt;
 
     // Is it on topic?
     const isOnTopicBody = JSON.stringify([
@@ -127,14 +124,14 @@ async function runRedteamConversation(
       },
       {
         role: 'user',
-        content: newPrompt,
+        content: targetPrompt,
       },
     ]);
     const isOnTopicResp = await redteamProvider.callApi(isOnTopicBody);
     invariant(typeof isOnTopicResp.output === 'string', 'Expected output to be a string');
     const isOnTopic = JSON.parse(isOnTopicResp.output).isOnTopic;
 
-    const targetResp = await targetProvider.callApi(newPrompt);
+    const targetResp = await targetProvider.callApi(targetPrompt);
     invariant(typeof targetResp.output === 'string', 'Expected output to be a string');
     const targetResponse = targetResp.output;
 
@@ -170,7 +167,24 @@ async function runRedteamConversation(
     });
   }
 
-  return { output: bestResponse };
+  return {
+    output: bestResponse,
+    metadata: {
+      redteamFinalPrompt: targetPrompt,
+    },
+  };
+}
+
+class RedteamIterativeJailbreaks implements ApiProvider {
+  id() {
+    return 'redteam-iterative-jailbreaks';
+  }
+
+  async callApi(prompt: string, context?: CallApiContextParams, options?: CallApiOptionsParams) {
+    invariant(options?.originalProvider, 'Expected originalProvider to be set');
+    invariant(context?.vars, 'Expected vars to be set');
+    return runRedteamConversation(prompt, context.vars, options?.originalProvider);
+  }
 }
 
 export default RedteamIterativeJailbreaks;

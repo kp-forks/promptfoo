@@ -10,6 +10,7 @@ import { EvaluateTableOutput } from '@/app/eval/types';
 import { useShiftKey } from '@/app/hooks/useShiftKey';
 import Tooltip from '@mui/material/Tooltip';
 import { diffSentences, diffJson, diffWords } from 'diff';
+import remarkGfm from 'remark-gfm';
 
 function scoreToString(score: number | null) {
   if (score === null || score === 0 || score === 1) {
@@ -182,6 +183,7 @@ function EvalOutputCell({
   } else if (renderMarkdown) {
     node = (
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           img: ({ src, alt }) => (
             <img
@@ -354,6 +356,7 @@ function EvalOutputCell({
             provider={output.provider}
             gradingResults={output.gradingResult?.componentResults}
             output={text}
+            metadata={output.metadata}
           />
         </>
       )}
