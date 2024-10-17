@@ -95,7 +95,10 @@ export async function doEval(
       failing: cmdObj.filterFailing,
     });
 
-    testSuite.providers = filterProviders(testSuite.providers, cmdObj.filterProviders);
+    testSuite.providers = filterProviders(
+      testSuite.providers,
+      cmdObj.filterProviders || cmdObj.filterTargets,
+    );
 
     const options: EvaluateOptions = {
       showProgressBar: getLogLevel() === 'debug' ? false : cmdObj.progressBar,
@@ -411,7 +414,10 @@ export function evalCommand(
       '--filter-pattern <pattern>',
       'Only run tests whose description matches the regular expression pattern',
     )
-    .option('--filter-providers <providers>', 'Only run tests with these providers')
+    .option(
+      '--filter-providers, --filter-targets <providers>',
+      'Only run tests with these providers (regex match)',
+    )
     .option('--filter-failing <path>', 'Path to json output file')
 
     // Output configuration
@@ -449,8 +455,7 @@ export function evalCommand(
     .option('--description <description>', 'Description of the eval run')
     .option('--verbose', 'Show debug logs', defaultConfig?.commandLineOptions?.verbose)
     .option('--no-progress-bar', 'Do not show progress bar')
-
-    .action(async (opts: EvalCommandOptions) => {
+    .action(async (opts: EvalCommandOptions, command: Command) => {
       let validatedOpts: z.infer<typeof EvalCommandSchema>;
       try {
         validatedOpts = EvalCommandSchema.parse(opts);
@@ -462,6 +467,9 @@ export function evalCommand(
         `);
         process.exitCode = 1;
         return;
+      }
+      if (command.args.length > 0) {
+        logger.warn(`Unknown command: ${command.args[0]}. Did you mean -c ${command.args[0]}?`);
       }
 
       if (validatedOpts.help) {

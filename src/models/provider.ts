@@ -9,41 +9,43 @@ function getProviderId(provider: ApiProvider): string {
 }
 
 export default class Provider {
-  static async createMultiple(providers: ApiProvider[]) {
-    const db = getDb();
+  static async createMultiple(providers: ApiProvider[], opts?: { persist: boolean }) {
     const ret: Provider[] = [];
-
     for (const provider of providers) {
       const id = getProviderId(provider);
-      let providerResult: { id: string; providerId: string; config: Record<string, any> };
-      let results = await db.select().from(providerTable).where(eq(providerTable.id, id));
-      if (results.length > 0) {
-        providerResult = results[0];
+      if (opts?.persist) {
+        const db = getDb();
+        let results = await db.select().from(providerTable).where(eq(providerTable.id, id));
+        let providerResult: { id: string; providerId: string; label: string | null };
+        if (results.length > 0) {
+          providerResult = results[0];
+        } else {
+          results = await db
+            .insert(providerTable)
+            .values({
+              id,
+              providerId: provider.id(),
+              label: provider.label,
+            })
+            .onConflictDoNothing()
+            .returning();
+          providerResult = results[0];
+        }
+        ret.push(new Provider(providerResult.id, providerResult.providerId, providerResult.label));
       } else {
-        results = await db
-          .insert(providerTable)
-          .values({
-            id,
-            providerId: provider.id(),
-            config: provider.config || {},
-          })
-          .onConflictDoNothing()
-          .returning();
-        providerResult = results[0];
+        ret.push(new Provider(id, provider.id(), provider.label));
       }
-      ret.push(new Provider(providerResult.id, providerResult.providerId, providerResult.config));
     }
-
     return ret;
   }
 
   constructor(
     public id: string,
     public providerId: string,
-    public config: Record<string, any>,
+    public label: string | null = null,
   ) {
     this.id = id;
     this.providerId = providerId;
-    this.config = config;
+    this.label = label;
   }
 }
