@@ -11,6 +11,7 @@ import type { EnvOverrides } from '../types/env';
 import type {
   ApiEmbeddingProvider,
   ApiProvider,
+  CallApiContextParams,
   ProviderEmbeddingResponse,
   ProviderResponse,
 } from '../types/providers';
@@ -301,7 +302,8 @@ export interface BedrockDeepseekGenerationOptions extends BedrockOptions {
   top_p?: number;
   stop?: string[];
 }
-interface IBedrockModel {
+
+export interface IBedrockModel {
   params: (config: BedrockOptions, prompt: string, stop: string[], modelName?: string) => any;
   output: (config: BedrockOptions, responseJson: any) => any;
   tokenUsage?: (responseJson: any, promptText: string) => TokenUsage;
@@ -1229,6 +1231,7 @@ export const AWS_BEDROCK_MODELS: Record<string, IBedrockModel> = {
   'amazon.nova-lite-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'amazon.nova-micro-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'amazon.nova-pro-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
+  'amazon.nova-premier-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'amazon.titan-text-express-v1': BEDROCK_MODEL.TITAN_TEXT,
   'amazon.titan-text-lite-v1': BEDROCK_MODEL.TITAN_TEXT,
   'amazon.titan-text-premier-v1:0': BEDROCK_MODEL.TITAN_TEXT,
@@ -1268,6 +1271,7 @@ export const AWS_BEDROCK_MODELS: Record<string, IBedrockModel> = {
   'apac.amazon.nova-lite-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'apac.amazon.nova-micro-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'apac.amazon.nova-pro-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
+  'apac.amazon.nova-premier-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'apac.anthropic.claude-3-5-sonnet-20240620-v1:0': BEDROCK_MODEL.CLAUDE_MESSAGES,
   'apac.anthropic.claude-3-haiku-20240307-v1:0': BEDROCK_MODEL.CLAUDE_MESSAGES,
   'apac.anthropic.claude-3-sonnet-20240229-v1:0': BEDROCK_MODEL.CLAUDE_MESSAGES,
@@ -1278,6 +1282,7 @@ export const AWS_BEDROCK_MODELS: Record<string, IBedrockModel> = {
   'eu.amazon.nova-lite-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'eu.amazon.nova-micro-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'eu.amazon.nova-pro-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
+  'eu.amazon.nova-premier-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'eu.anthropic.claude-3-5-sonnet-20240620-v1:0': BEDROCK_MODEL.CLAUDE_MESSAGES,
   'eu.anthropic.claude-3-haiku-20240307-v1:0': BEDROCK_MODEL.CLAUDE_MESSAGES,
   'eu.anthropic.claude-3-sonnet-20240229-v1:0': BEDROCK_MODEL.CLAUDE_MESSAGES,
@@ -1294,6 +1299,7 @@ export const AWS_BEDROCK_MODELS: Record<string, IBedrockModel> = {
   'us.amazon.nova-lite-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'us.amazon.nova-micro-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'us.amazon.nova-pro-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
+  'us.amazon.nova-premier-v1:0': BEDROCK_MODEL.AMAZON_NOVA,
   'us.anthropic.claude-3-5-haiku-20241022-v1:0': BEDROCK_MODEL.CLAUDE_MESSAGES,
   'us.anthropic.claude-3-5-sonnet-20240620-v1:0': BEDROCK_MODEL.CLAUDE_MESSAGES,
   'us.anthropic.claude-3-5-sonnet-20241022-v2:0': BEDROCK_MODEL.CLAUDE_MESSAGES,
@@ -1468,7 +1474,7 @@ export abstract class AwsBedrockGenericProvider {
 export class AwsBedrockCompletionProvider extends AwsBedrockGenericProvider implements ApiProvider {
   static AWS_BEDROCK_COMPLETION_MODELS = Object.keys(AWS_BEDROCK_MODELS);
 
-  async callApi(prompt: string): Promise<ProviderResponse> {
+  async callApi(prompt: string, context?: CallApiContextParams): Promise<ProviderResponse> {
     let stop: string[];
     try {
       stop = getEnvString('AWS_BEDROCK_STOP') ? JSON.parse(getEnvString('AWS_BEDROCK_STOP')!) : [];
@@ -1483,7 +1489,12 @@ export class AwsBedrockCompletionProvider extends AwsBedrockGenericProvider impl
       );
       model = BEDROCK_MODEL.CLAUDE_MESSAGES;
     }
-    const params = model.params(this.config, prompt, stop, this.modelName);
+    const params = model.params(
+      { ...this.config, ...context?.prompt.config },
+      prompt,
+      stop,
+      this.modelName,
+    );
 
     logger.debug(`Calling Amazon Bedrock API: ${JSON.stringify(params)}`);
 
