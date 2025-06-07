@@ -1,4 +1,4 @@
-import { AwsBedrockKnowledgeBaseProvider } from '../../src/providers/bedrockKnowledgeBase';
+import { AwsBedrockKnowledgeBaseProvider } from '../../../src/providers/bedrock/knowledgeBase';
 
 const mockSend = jest.fn();
 const mockBedrockClient = {
@@ -26,7 +26,7 @@ const mockGet = jest.fn();
 const mockSet = jest.fn();
 const mockIsCacheEnabled = jest.fn().mockReturnValue(false);
 
-jest.mock('../../src/cache', () => ({
+jest.mock('../../../src/cache', () => ({
   getCache: jest.fn().mockImplementation(() => ({
     get: mockGet,
     set: mockSet,
@@ -38,10 +38,26 @@ describe('AwsBedrockKnowledgeBaseProvider', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env.AWS_BEDROCK_MAX_RETRIES;
+    delete process.env.HTTPS_PROXY;
+    delete process.env.https_proxy;
+    delete process.env.HTTP_PROXY;
+    delete process.env.http_proxy;
+    delete process.env.npm_config_https_proxy;
+    delete process.env.npm_config_http_proxy;
+    delete process.env.npm_config_proxy;
+    delete process.env.all_proxy;
   });
 
   afterEach(() => {
     jest.clearAllMocks();
+    delete process.env.HTTPS_PROXY;
+    delete process.env.https_proxy;
+    delete process.env.HTTP_PROXY;
+    delete process.env.http_proxy;
+    delete process.env.npm_config_https_proxy;
+    delete process.env.npm_config_http_proxy;
+    delete process.env.npm_config_proxy;
+    delete process.env.all_proxy;
   });
 
   it('should throw an error if knowledgeBaseId is not provided', () => {
