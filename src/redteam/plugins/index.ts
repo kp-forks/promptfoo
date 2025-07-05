@@ -8,6 +8,7 @@ import type { ApiProvider, PluginActionParams, PluginConfig, TestCase } from '..
 import invariant from '../../util/invariant';
 import type { HarmPlugin } from '../constants';
 import {
+  BIAS_PLUGINS,
   PII_PLUGINS,
   REDTEAM_PROVIDER_HARM_PLUGINS,
   UNALIGNED_PROVIDER_HARM_PLUGINS,
@@ -18,6 +19,7 @@ import {
   shouldGenerateRemote,
 } from '../remoteGeneration';
 import { getShortPluginId } from '../util';
+import { AegisPlugin } from './aegis';
 import { MEMORY_POISONING_PLUGIN_ID } from './agentic/constants';
 import { type RedteamPluginBase } from './base';
 import { BeavertailsPlugin } from './beavertails';
@@ -45,7 +47,7 @@ import { RbacPlugin } from './rbac';
 import { ShellInjectionPlugin } from './shellInjection';
 import { SqlInjectionPlugin } from './sqlInjection';
 import { ToolDiscoveryPlugin } from './toolDiscovery';
-import { ToolDiscoveryMultiTurnPlugin } from './toolDiscoveryMultiTurn';
+import { ToxicChatPlugin } from './toxicChat';
 import { UnsafeBenchPlugin } from './unsafebench';
 import { XSTestPlugin } from './xstest';
 
@@ -170,8 +172,9 @@ const pluginFactories: PluginFactory[] = [
   createPluginFactory(ExcessiveAgencyPlugin, 'excessive-agency'),
   createPluginFactory(XSTestPlugin, 'xstest'),
   createPluginFactory(ToolDiscoveryPlugin, 'tool-discovery'),
-  createPluginFactory(ToolDiscoveryMultiTurnPlugin, 'tool-discovery:multi-turn'),
   createPluginFactory(HarmbenchPlugin, 'harmbench'),
+  createPluginFactory(ToxicChatPlugin, 'toxic-chat'),
+  createPluginFactory(AegisPlugin, 'aegis'),
   createPluginFactory(HallucinationPlugin, 'hallucination'),
   createPluginFactory(ImitationPlugin, 'imitation'),
   createPluginFactory<{ intent: string }>(IntentPlugin, 'intent', (config: { intent: string }) =>
@@ -216,6 +219,7 @@ const piiPlugins: PluginFactory[] = PII_PLUGINS.map((category: string) => ({
         params.purpose,
         params.injectVar,
         params.n,
+        params.config,
       );
       return testCases.map((testCase) => ({
         ...testCase,
@@ -227,6 +231,29 @@ const piiPlugins: PluginFactory[] = PII_PLUGINS.map((category: string) => ({
     }
     logger.debug(`Using local redteam generation for ${category}`);
     const testCases = await getPiiLeakTestsForCategory(params, category);
+    return testCases.map((testCase) => ({
+      ...testCase,
+      metadata: {
+        ...testCase.metadata,
+        pluginId: getShortPluginId(category),
+      },
+    }));
+  },
+}));
+
+const biasPlugins: PluginFactory[] = BIAS_PLUGINS.map((category: string) => ({
+  key: category,
+  action: async (params: PluginActionParams) => {
+    if (neverGenerateRemote()) {
+      throw new Error(`${category} plugin requires remote generation to be enabled`);
+    }
+
+    const testCases = await fetchRemoteTestCases(
+      category,
+      params.purpose,
+      params.injectVar,
+      params.n,
+    );
     return testCases.map((testCase) => ({
       ...testCase,
       metadata: {
@@ -257,7 +284,7 @@ function createRemotePlugin<T extends PluginConfig>(
         },
       }));
 
-      if (key.startsWith('harmful:')) {
+      if (key.startsWith('harmful:') || key.startsWith('bias:')) {
         return testsWithMetadata.map((testCase) => ({
           ...testCase,
           assert: getHarmfulAssertions(key as HarmPlugin),
@@ -270,7 +297,6 @@ function createRemotePlugin<T extends PluginConfig>(
 const remotePlugins: PluginFactory[] = [
   MEMORY_POISONING_PLUGIN_ID,
   'ascii-smuggling',
-  'bias:gender',
   'bfla',
   'bola',
   'cca',
@@ -278,13 +304,24 @@ const remotePlugins: PluginFactory[] = [
   'harmful:misinformation-disinformation',
   'harmful:specialized-advice',
   'hijacking',
+  'mcp',
+  'medical:anchoring-bias',
+  'medical:hallucination',
+  'medical:incorrect-knowledge',
+  'medical:prioritization-error',
+  'medical:sycophancy',
+  'financial:calculation-error',
+  'financial:compliance-violation',
+  'financial:data-leakage',
+  'financial:hallucination',
+  'financial:sycophancy',
+  'off-topic',
   'rag-document-exfiltration',
   'rag-poisoning',
   'reasoning-dos',
   'religion',
   'ssrf',
   'system-prompt-override',
-  'mcp',
 ].map((key) => createRemotePlugin(key));
 
 remotePlugins.push(
@@ -298,4 +335,9 @@ remotePlugins.push(
   ),
 );
 
-export const Plugins: PluginFactory[] = [...pluginFactories, ...piiPlugins, ...remotePlugins];
+export const Plugins: PluginFactory[] = [
+  ...pluginFactories,
+  ...piiPlugins,
+  ...biasPlugins,
+  ...remotePlugins,
+];
