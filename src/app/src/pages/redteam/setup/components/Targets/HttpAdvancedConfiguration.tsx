@@ -8,14 +8,18 @@ import InsertDriveFileIcon from '@mui/icons-material/InsertDriveFile';
 import KeyIcon from '@mui/icons-material/Key';
 import UploadIcon from '@mui/icons-material/Upload';
 import VpnKeyIcon from '@mui/icons-material/VpnKey';
-import { FormControl, FormControlLabel, RadioGroup, Radio, FormGroup } from '@mui/material';
 import Accordion from '@mui/material/Accordion';
 import AccordionDetails from '@mui/material/AccordionDetails';
 import AccordionSummary from '@mui/material/AccordionSummary';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import FormControl from '@mui/material/FormControl';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import FormGroup from '@mui/material/FormGroup';
 import Paper from '@mui/material/Paper';
+import Radio from '@mui/material/Radio';
+import RadioGroup from '@mui/material/RadioGroup';
 import Stack from '@mui/material/Stack';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
@@ -59,6 +63,7 @@ const HttpAdvancedConfiguration: React.FC<HttpAdvancedConfigurationProps> = ({
         <Typography variant="h6" gutterBottom>
           Advanced Configuration
         </Typography>
+
         <Accordion defaultExpanded={!!selectedTarget.config.transformRequest}>
           <AccordionSummary expandIcon={<ExpandMoreIcon />}>
             <Box>
@@ -155,6 +160,50 @@ const HttpAdvancedConfiguration: React.FC<HttpAdvancedConfigurationProps> = ({
                 }}
               />
             </Box>
+          </AccordionDetails>
+        </Accordion>
+
+        <Accordion defaultExpanded={!!selectedTarget.config.tokenEstimation?.enabled}>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box>
+              <Typography variant="h6">Token Estimation</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Enable approximate token counting for cost tracking
+              </Typography>
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Typography variant="body1" sx={{ mb: 2 }}>
+              Enable word-based token estimation for APIs that don't return token usage information.
+              See{' '}
+              <a
+                href="https://www.promptfoo.dev/docs/providers/http/#token-estimation"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                docs
+              </a>{' '}
+              for more information.
+            </Typography>
+
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={!!selectedTarget.config.tokenEstimation?.enabled}
+                  onChange={(event) => {
+                    if (event.target.checked) {
+                      updateCustomTarget('tokenEstimation', {
+                        enabled: true,
+                        multiplier: selectedTarget.config.tokenEstimation?.multiplier ?? 1.3,
+                      });
+                    } else {
+                      updateCustomTarget('tokenEstimation', { enabled: false });
+                    }
+                  }}
+                />
+              }
+              label="Enable token estimation"
+            />
           </AccordionDetails>
         </Accordion>
 
@@ -515,7 +564,7 @@ const HttpAdvancedConfiguration: React.FC<HttpAdvancedConfigurationProps> = ({
                             try {
                               const inputKey =
                                 selectedTarget.config.signatureAuth?.privateKey || '';
-                              const formattedKey = convertStringKeyToPem(inputKey);
+                              const formattedKey = await convertStringKeyToPem(inputKey);
                               updateCustomTarget('signatureAuth', {
                                 ...selectedTarget.config.signatureAuth,
                                 privateKey: formattedKey,

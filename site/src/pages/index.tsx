@@ -22,7 +22,7 @@ function HomepageHeader({ getStartedUrl }: { getStartedUrl: string }) {
           from <span className={styles.heroHighlight}>prompt</span> to{' '}
           <span className={styles.heroHighlight}>production</span>
         </h1>
-        <p>Open-source LLM security trusted by 80,000+ users</p>
+        <p>Open-source LLM security trusted by 100,000+ users</p>
         <div className={styles.buttons}>
           <Link className="button button--primary button--lg" to={getStartedUrl}>
             Get Started
@@ -44,13 +44,15 @@ function HomepageWalkthrough() {
   const [selectedStep, setSelectedStep] = React.useState(() => {
     if (typeof window !== 'undefined') {
       if (window.location.hash === '#evals') {
-        return 4;
+        return 5;
       } else if (window.location.hash === '#redteam') {
         return 1;
       } else if (window.location.hash === '#guardrails') {
         return 2;
       } else if (window.location.hash === '#modelsecurity') {
         return 3;
+      } else if (window.location.hash === '#mcp') {
+        return 4;
       }
     }
     return 1; // Default to Red Teaming
@@ -169,6 +171,37 @@ function HomepageWalkthrough() {
     },
     {
       id: 4,
+      caption: 'MCP',
+      mobileCaption: 'MCP',
+      image: '/img/mcp-proxy-dashboard.png',
+      image2x: '/img/mcp-proxy-dashboard.png',
+      description: (
+        <>
+          <p className={styles.walkthroughHeading}>
+            Enterprise MCP proxy for secure AI tool integration into your Applications and Users
+          </p>
+          <p>Control and monitor Model Context Protocol (MCP) servers in your organization:</p>
+          <ul>
+            <li>Whitelist approved MCP servers for enterprise use</li>
+            <li>Grant access to approved MCP servers to your applications and users</li>
+            <li>Real-time monitoring for PII and sensitive data</li>
+            <li>Prevent security risks from untrusted MCP servers</li>
+          </ul>
+          <p>
+            Ensure your AI applications only access authorized tools and data sources while
+            maintaining full visibility into MCP interactions.
+          </p>
+          <p>
+            <strong>
+              <Link to="/mcp">&raquo; Learn more about MCP Security</Link>
+            </strong>
+          </p>
+        </>
+      ),
+      icon: <DescriptionIcon />,
+      destinationUrl: '/mcp',
+    },
+    {
       caption: 'Evaluations',
       mobileCaption: 'Evals',
       image: '/img/claude-vs-gpt-example.png',
@@ -199,9 +232,27 @@ function HomepageWalkthrough() {
   ];
 
   const selectedStepData = steps.find((step) => step.id === selectedStep);
+  const tabsRef = React.useRef<HTMLDivElement>(null);
+  const [showScrollIndicator, setShowScrollIndicator] = React.useState(false);
+
+  React.useEffect(() => {
+    const checkScroll = () => {
+      if (tabsRef.current && isMobile) {
+        const { scrollWidth, clientWidth } = tabsRef.current;
+        setShowScrollIndicator(scrollWidth > clientWidth);
+      }
+    };
+    checkScroll();
+    window.addEventListener('resize', checkScroll);
+    return () => window.removeEventListener('resize', checkScroll);
+  }, [isMobile]);
+
   return (
     <div className={styles.walkthroughContainer}>
-      <div className={styles.walkthroughTabs}>
+      <div
+        className={clsx(styles.walkthroughTabs, showScrollIndicator && styles.scrollable)}
+        ref={tabsRef}
+      >
         {steps.map((step) => (
           <button
             key={step.id}
@@ -312,7 +363,7 @@ export default function Home(): JSX.Element {
   return (
     <Layout
       title="Secure & reliable LLMs"
-      description="Eliminate risk with AI red-teaming and evals used by 80,000+ developers. Find and fix vulnerabilities, maximize output quality, catch regressions."
+      description="Eliminate risk with AI red-teaming and evals used by 100,000+ developers. Find and fix vulnerabilities, maximize output quality, catch regressions."
       wrapperClassName="homepage-wrapper"
     >
       <Head>

@@ -2,16 +2,16 @@ import dedent from 'dedent';
 import path from 'path';
 import { importModule } from '../esm';
 import logger from '../logger';
-import { MEMORY_POISONING_PLUGIN_ID } from '../redteam/plugins/agentic/constants';
 import { MemoryPoisoningProvider } from '../redteam/providers/agentic/memoryPoisoning';
 import RedteamBestOfNProvider from '../redteam/providers/bestOfN';
 import RedteamCrescendoProvider from '../redteam/providers/crescendo';
+import RedteamCustomProvider from '../redteam/providers/custom';
 import RedteamGoatProvider from '../redteam/providers/goat';
 import RedteamIterativeProvider from '../redteam/providers/iterative';
 import RedteamImageIterativeProvider from '../redteam/providers/iterativeImage';
 import RedteamIterativeTreeProvider from '../redteam/providers/iterativeTree';
+import RedteamMischievousUserProvider from '../redteam/providers/mischievousUser';
 import RedteamPandamoniumProvider from '../redteam/providers/pandamonium';
-import { ServerToolDiscoveryMultiProvider } from '../redteam/providers/toolDiscoveryMulti';
 import type { LoadApiProviderContext } from '../types';
 import type { ApiProvider, ProviderOptions } from '../types/providers';
 import { isJavascriptFile } from '../util/fileExtensions';
@@ -26,11 +26,10 @@ import { AzureCompletionProvider } from './azure/completion';
 import { AzureEmbeddingProvider } from './azure/embedding';
 import { AzureModerationProvider } from './azure/moderation';
 import { BAMProvider } from './bam';
-import { AwsBedrockCompletionProvider, AwsBedrockEmbeddingProvider } from './bedrock';
+import { AwsBedrockCompletionProvider, AwsBedrockEmbeddingProvider } from './bedrock/index';
 import { BrowserProvider } from './browser';
 import { createCerebrasProvider } from './cerebras';
 import { ClouderaAiChatCompletionProvider } from './cloudera';
-import * as CloudflareAiProviders from './cloudflare-ai';
 import { CohereChatCompletionProvider, CohereEmbeddingProvider } from './cohere';
 import { DatabricksMosaicAiChatCompletionProvider } from './databricks';
 import { EchoProvider } from './echo';
@@ -40,6 +39,7 @@ import { AIStudioChatProvider } from './google/ai.studio';
 import { GoogleLiveProvider } from './google/live';
 import { VertexChatProvider, VertexEmbeddingProvider } from './google/vertex';
 import { GroqProvider } from './groq';
+import { HeliconeGatewayProvider } from './helicone';
 import { HttpProvider } from './http';
 import {
   HuggingfaceFeatureExtractionProvider,
@@ -50,7 +50,6 @@ import {
 } from './huggingface';
 import { JfrogMlChatCompletionProvider } from './jfrog';
 import { createLambdaLabsProvider } from './lambdalabs';
-import { LiteLLMProvider } from './litellm';
 import { LlamaProvider } from './llama';
 import {
   LocalAiChatProvider,
@@ -58,6 +57,7 @@ import {
   LocalAiEmbeddingProvider,
 } from './localai';
 import { ManualInputProvider } from './manualInput';
+import { MCPProvider } from './mcp';
 import { MistralChatCompletionProvider, MistralEmbeddingProvider } from './mistral';
 import { OllamaChatProvider, OllamaCompletionProvider, OllamaEmbeddingProvider } from './ollama';
 import { OpenAiAssistantProvider } from './openai/assistant';
@@ -74,9 +74,9 @@ import { PortkeyChatCompletionProvider } from './portkey';
 import { PromptfooModelProvider } from './promptfooModel';
 import { PythonProvider } from './pythonCompletion';
 import {
+  ReplicateImageProvider,
   ReplicateModerationProvider,
   ReplicateProvider,
-  ReplicateImageProvider,
 } from './replicate';
 import { createScriptBasedProviderFactory } from './scriptBasedProvider';
 import { ScriptCompletionProvider } from './scriptCompletion';
@@ -87,7 +87,8 @@ import { VoyageEmbeddingProvider } from './voyage';
 import { WatsonXProvider } from './watsonx';
 import { WebhookProvider } from './webhook';
 import { WebSocketProvider } from './websocket';
-import { createXAIProvider } from './xai';
+import { createXAIProvider } from './xai/chat';
+import { createXAIImageProvider } from './xai/image';
 
 interface ProviderFactory {
   test: (providerPath: string) => boolean;
@@ -103,7 +104,7 @@ export const providerMap: ProviderFactory[] = [
   createScriptBasedProviderFactory('golang', 'go', GolangProvider),
   createScriptBasedProviderFactory('python', 'py', PythonProvider),
   {
-    test: (providerPath: string) => providerPath === MEMORY_POISONING_PLUGIN_ID,
+    test: (providerPath: string) => providerPath === 'agentic:memory-poisoning',
     create: async (
       providerPath: string,
       providerOptions: ProviderOptions,
@@ -292,7 +293,7 @@ export const providerMap: ProviderFactory[] = [
         return new AwsBedrockEmbeddingProvider(modelName, providerOptions);
       }
       if (modelType === 'kb' || modelType === 'knowledge-base') {
-        const { AwsBedrockKnowledgeBaseProvider } = await import('./bedrockKnowledgeBase');
+        const { AwsBedrockKnowledgeBaseProvider } = await import('./bedrock/knowledgeBase');
         return new AwsBedrockKnowledgeBaseProvider(modelName, providerOptions);
       }
       return new AwsBedrockCompletionProvider(
@@ -381,32 +382,11 @@ export const providerMap: ProviderFactory[] = [
       providerOptions: ProviderOptions,
       context: LoadApiProviderContext,
     ) => {
-      // Load Cloudflare AI
-      const splits = providerPath.split(':');
-      const modelType = splits[1];
-      const deploymentName = splits[2];
-
-      if (modelType === 'chat') {
-        return new CloudflareAiProviders.CloudflareAiChatCompletionProvider(
-          deploymentName,
-          providerOptions,
-        );
-      }
-      if (modelType === 'embedding' || modelType === 'embeddings') {
-        return new CloudflareAiProviders.CloudflareAiEmbeddingProvider(
-          deploymentName,
-          providerOptions,
-        );
-      }
-      if (modelType === 'completion') {
-        return new CloudflareAiProviders.CloudflareAiCompletionProvider(
-          deploymentName,
-          providerOptions,
-        );
-      }
-      throw new Error(
-        `Unknown Cloudflare AI model type: ${modelType}. Use one of the following providers: cloudflare-ai:chat:<model name>, cloudflare-ai:completion:<model name>, cloudflare-ai:embedding:`,
-      );
+      const { createCloudflareAiProvider } = await import('./cloudflare-ai');
+      return createCloudflareAiProvider(providerPath, {
+        ...providerOptions,
+        env: context.env,
+      });
     },
   },
   {
@@ -565,6 +545,25 @@ export const providerMap: ProviderFactory[] = [
     },
   },
   {
+    test: (providerPath: string) => providerPath.startsWith('helicone:'),
+    create: async (
+      providerPath: string,
+      providerOptions: ProviderOptions,
+      context: LoadApiProviderContext,
+    ) => {
+      // Parse helicone:model format (e.g., helicone:openai/gpt-4o)
+      const model = providerPath.substring('helicone:'.length);
+
+      if (!model) {
+        throw new Error(
+          'Helicone provider requires a model in format helicone:<provider/model> (e.g., helicone:openai/gpt-4o, helicone:anthropic/claude-3-5-sonnet)',
+        );
+      }
+
+      return new HeliconeGatewayProvider(model, providerOptions);
+    },
+  },
+  {
     test: (providerPath: string) => providerPath.startsWith('hyperbolic:'),
     create: async (
       providerPath: string,
@@ -572,15 +571,29 @@ export const providerMap: ProviderFactory[] = [
       context: LoadApiProviderContext,
     ) => {
       const splits = providerPath.split(':');
-      const modelName = splits.slice(1).join(':');
-      return new OpenAiChatCompletionProvider(modelName, {
-        ...providerOptions,
-        config: {
-          ...providerOptions.config,
-          apiBaseUrl: 'https://api.hyperbolic.xyz/v1',
-          apiKeyEnvar: 'HYPERBOLIC_API_KEY',
-        },
-      });
+      const modelType = splits[1];
+
+      // Handle hyperbolic:image:<model> format
+      if (modelType === 'image') {
+        const { createHyperbolicImageProvider } = await import('./hyperbolic/image');
+        return createHyperbolicImageProvider(providerPath, {
+          ...providerOptions,
+          env: context.env,
+        });
+      }
+
+      // Handle hyperbolic:audio:<model> format
+      if (modelType === 'audio') {
+        const { createHyperbolicAudioProvider } = await import('./hyperbolic/audio');
+        return createHyperbolicAudioProvider(providerPath, {
+          ...providerOptions,
+          env: context.env,
+        });
+      }
+
+      // Handle regular hyperbolic:<model> format for chat
+      const { createHyperbolicProvider } = await import('./hyperbolic/chat');
+      return createHyperbolicProvider(providerPath, providerOptions);
     },
   },
   {
@@ -590,8 +603,11 @@ export const providerMap: ProviderFactory[] = [
       providerOptions: ProviderOptions,
       context: LoadApiProviderContext,
     ) => {
-      const modelName = providerPath.split(':')[1];
-      return new LiteLLMProvider(modelName, providerOptions);
+      const { createLiteLLMProvider } = await import('./litellm');
+      return createLiteLLMProvider(providerPath, {
+        config: providerOptions,
+        env: context.env,
+      });
     },
   },
   {
@@ -740,9 +756,7 @@ export const providerMap: ProviderFactory[] = [
             ...(providerOptions.config.models && { models: providerOptions.config.models }),
             ...(providerOptions.config.route && { route: providerOptions.config.route }),
             ...(providerOptions.config.provider && { provider: providerOptions.config.provider }),
-            ...(providerOptions.config.passthrough && {
-              passthrough: providerOptions.config.passthrough,
-            }),
+            ...(providerOptions.config.passthrough || {}),
           },
         },
       });
@@ -820,6 +834,20 @@ export const providerMap: ProviderFactory[] = [
     },
   },
   {
+    test: (providerPath: string) => providerPath.startsWith('aimlapi:'),
+    create: async (
+      providerPath: string,
+      providerOptions: ProviderOptions,
+      context: LoadApiProviderContext,
+    ) => {
+      const { createAimlApiProvider } = await import('./aimlapi');
+      return createAimlApiProvider(providerPath, {
+        ...providerOptions,
+        env: context.env,
+      });
+    },
+  },
+  {
     test: (providerPath: string) => providerPath.startsWith('vertex:'),
     create: async (
       providerPath: string,
@@ -878,6 +906,18 @@ export const providerMap: ProviderFactory[] = [
       providerOptions: ProviderOptions,
       context: LoadApiProviderContext,
     ) => {
+      const splits = providerPath.split(':');
+      const modelType = splits[1];
+
+      // Handle xai:image:<model> format
+      if (modelType === 'image') {
+        return createXAIImageProvider(providerPath, {
+          ...providerOptions,
+          env: context.env,
+        });
+      }
+
+      // Handle regular xai:<model> format
       return createXAIProvider(providerPath, {
         config: providerOptions,
         env: context.env,
@@ -977,6 +1017,32 @@ export const providerMap: ProviderFactory[] = [
     },
   },
   {
+    test: (providerPath: string) => providerPath === 'mcp' || providerPath.startsWith('mcp:'),
+    create: async (
+      providerPath: string,
+      providerOptions: ProviderOptions,
+      context: LoadApiProviderContext,
+    ) => {
+      const splits = providerPath.split(':');
+      let config = providerOptions.config || { enabled: true };
+
+      // Handle mcp:<server_name> format for server-specific configs
+      if (splits.length > 1) {
+        const serverName = splits[1];
+        // User can configure specific server in the config
+        config = {
+          ...config,
+          serverName,
+        };
+      }
+
+      return new MCPProvider({
+        config,
+        id: providerOptions.id,
+      });
+    },
+  },
+  {
     test: (providerPath: string) => providerPath === 'promptfoo:manual-input',
     create: async (
       providerPath: string,
@@ -1007,6 +1073,18 @@ export const providerMap: ProviderFactory[] = [
     },
   },
   {
+    test: (providerPath: string) =>
+      providerPath === 'promptfoo:redteam:custom' ||
+      providerPath.startsWith('promptfoo:redteam:custom:'),
+    create: async (
+      providerPath: string,
+      providerOptions: ProviderOptions,
+      context: LoadApiProviderContext,
+    ) => {
+      return new RedteamCustomProvider(providerOptions.config);
+    },
+  },
+  {
     test: (providerPath: string) => providerPath === 'promptfoo:redteam:goat',
     create: async (
       providerPath: string,
@@ -1014,6 +1092,16 @@ export const providerMap: ProviderFactory[] = [
       context: LoadApiProviderContext,
     ) => {
       return new RedteamGoatProvider(providerOptions.config);
+    },
+  },
+  {
+    test: (providerPath: string) => providerPath === 'promptfoo:redteam:mischievous-user',
+    create: async (
+      providerPath: string,
+      providerOptions: ProviderOptions,
+      context: LoadApiProviderContext,
+    ) => {
+      return new RedteamMischievousUserProvider(providerOptions.config);
     },
   },
   {
@@ -1138,16 +1226,6 @@ export const providerMap: ProviderFactory[] = [
       throw new Error(
         `Invalid Huggingface provider path: ${providerPath}. Use one of the following providers: huggingface:feature-extraction:<model name>, huggingface:text-generation:<model name>, huggingface:text-classification:<model name>, huggingface:token-classification:<model name>`,
       );
-    },
-  },
-  {
-    test: (providerPath: string) => providerPath === 'promptfoo:redteam:tool-discovery:multi-turn',
-    create: async (
-      providerPath: string,
-      providerOptions: ProviderOptions,
-      context: LoadApiProviderContext,
-    ) => {
-      return new ServerToolDiscoveryMultiProvider(providerOptions.config);
     },
   },
   {
